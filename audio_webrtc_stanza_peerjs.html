@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chiamata audio WebRTC con stanza</title>
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a; --panel: #111827; --panel2: #1f2937; --text: #e5e7eb;
+      --muted: #9ca3af; --accent: #38bdf8; --ok: #22c55e; --bad: #ef4444;
+      --warn: #f59e0b; --border: #334155; --button: #2563eb; --button2: #475569;
+    }
+    body.light {
+      --bg: #f4f7fb; --panel: #ffffff; --panel2: #eef2ff; --text: #111827;
+      --muted: #4b5563; --accent: #0369a1; --ok: #15803d; --bad: #b91c1c;
+      --warn: #b45309; --border: #cbd5e1; --button: #2563eb; --button2: #64748b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(circle at top, rgba(56,189,248,.18), transparent 35%), var(--bg);
+      color: var(--text); min-height: 100vh; padding: 16px;
+    }
+    .container { max-width: 980px; margin: 0 auto; }
+    .topbar { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 14px; }
+    h1 { margin: 0 0 6px; font-size: clamp(1.45rem, 4vw, 2.15rem); }
+    .subtitle { color: var(--muted); line-height: 1.45; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+      padding: 16px; box-shadow: 0 14px 35px rgba(0,0,0,.20); margin-bottom: 14px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } .topbar { flex-direction: column; } }
+    label { display: block; font-weight: 700; margin: 10px 0 6px; }
+    input {
+      width: 100%; border-radius: 12px; border: 1px solid var(--border); background: var(--panel2);
+      color: var(--text); padding: 12px; font-size: 1rem; outline: none;
+    }
+    button {
+      border: 0; border-radius: 999px; color: white; background: var(--button);
+      padding: 11px 15px; font-size: .95rem; font-weight: 800; cursor: pointer; margin: 6px 6px 6px 0;
+    }
+    button.secondary { background: var(--button2); }
+    button.danger { background: #dc2626; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); margin: 4px 4px 4px 0; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+    .status {
+      min-height: 54px; line-height: 1.45; padding: 12px; border-radius: 14px;
+      border: 1px dashed var(--border); background: var(--panel2); color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .big { font-size: 1.05rem; line-height: 1.5; }
+    .small { font-size: .88rem; color: var(--muted); line-height: 1.45; }
+    .copybox { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .linkout { color: var(--accent); word-break: break-all; }
+    audio { width: 100%; margin-top: 10px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div>
+        <h1>Chiamata audio semplice con stanza</h1>
+        <div class="subtitle">Due utenti entrano nella stessa stanza. Non servono più codici lunghi di invito e risposta.</div>
+      </div>
+      <button id="themeBtn" class="secondary" type="button">Tema chiaro</button>
+    </div>
+
+    <div class="card">
+      <div class="big">
+        <span class="pill">1. scegliete lo stesso nome stanza</span>
+        <span class="pill">2. uno crea la stanza</span>
+        <span class="pill">3. l’altro entra</span>
+      </div>
+      <p class="small">
+        Questa versione usa PeerJS Cloud solo per far trovare i due browser. L’audio resta una chiamata WebRTC cifrata; in alcuni casi può passare da un server relay TURN se le reti lo richiedono.
+        Serve internet e, normalmente, una pagina aperta in HTTPS oppure localhost per l’accesso al microfono.
+      </p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Stanza</h2>
+        <label for="roomName">Nome stanza</label>
+        <input id="roomName" value="giorgio" autocomplete="off" placeholder="es. giorgio, lezione1, prova" />
+        <div style="margin-top:10px">
+          <button id="hostBtn" type="button">Crea stanza</button>
+          <button id="joinBtn" type="button">Entra nella stanza</button>
+          <button id="copyLinkBtn" class="secondary" type="button">Copia link invito</button>
+        </div>
+        <p class="small">
+          Il primo utente deve premere <b>Crea stanza</b>. Il secondo deve scrivere lo stesso nome e premere <b>Entra nella stanza</b>.
+        </p>
+        <div id="inviteArea" class="hidden">
+          <label>Link invito</label>
+          <div class="copybox">
+            <span id="inviteLink" class="linkout"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Chiamata</h2>
+        <div>
+          <button id="muteBtn" class="secondary" type="button" disabled>Disattiva microfono</button>
+          <button id="hangBtn" class="danger" type="button" disabled>Chiudi chiamata</button>
+        </div>
+        <audio id="remoteAudio" autoplay playsinline controls></audio>
+        <p class="small">Se non senti l’audio, controlla il volume, i permessi del microfono e che entrambi abbiate premuto il ruolo corretto.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Stato</h2>
+      <div id="status" class="status">Pronto. Scegli un nome stanza e crea o entra nella stanza.</div>
+    </div>
+
+    <div class="card">
+      <h2>Note pratiche</h2>
+      <p class="small">
+        Se due persone provano entrambe a creare la stessa stanza, una riceverà errore: in quel caso una deve premere “Crea stanza” e l’altra “Entra nella stanza”.
+        Se la rete blocca WebRTC, la chiamata può non partire: è un limite delle reti, non del file HTML.
+      </p>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const roomInput = $('roomName');
+  const hostBtn = $('hostBtn');
+  const joinBtn = $('joinBtn');
+  const copyLinkBtn = $('copyLinkBtn');
+  const muteBtn = $('muteBtn');
+  const hangBtn = $('hangBtn');
+  const themeBtn = $('themeBtn');
+  const statusEl = $('status');
+  const remoteAudio = $('remoteAudio');
+  const inviteArea = $('inviteArea');
+  const inviteLink = $('inviteLink');
+
+  let peer = null;
+  let localStream = null;
+  let currentCall = null;
+  let role = null;
+  let muted = false;
+
+  const params = new URLSearchParams(location.search);
+  const paramRoom = params.get('stanza') || params.get('room');
+  if (paramRoom) roomInput.value = paramRoom;
+
+  function setStatus(msg, cls='') {
+    statusEl.className = 'status ' + cls;
+    statusEl.textContent = msg;
+  }
+
+  function normalizeRoom(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 40) || 'giorgio';
+  }
+
+  function hostId(room) {
+    return 'gs-audio-room-' + room;
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function currentInviteLink() {
+    const room = normalizeRoom(roomInput.value);
+    try {
+      const url = new URL(location.href);
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('stanza', room);
+      return url.toString();
+    } catch(e) {
+      return 'Apri lo stesso file e inserisci questa stanza: ' + room;
+    }
+  }
+
+  async function getMic() {
+    if (localStream) return localStream;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Questo browser non espone getUserMedia. Prova Chrome/Edge aggiornato e pagina HTTPS.');
+    }
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    muteBtn.disabled = false;
+    return localStream;
+  }
+
+  function makePeer(id) {
+    if (peer) {
+      try { peer.destroy(); } catch(e) {}
+      peer = null;
+    }
+    peer = new Peer(id || undefined, {
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+      }
+    });
+
+    peer.on('error', (err) => {
+      let msg = err && (err.message || err.type) ? (err.message || err.type) : String(err);
+      if (String(msg).includes('is taken') || (err && err.type === 'unavailable-id')) {
+        msg = 'Questa stanza sembra già creata. Se sei il secondo utente, premi “Entra nella stanza”.';
+      }
+      setStatus('Errore: ' + msg, 'bad');
+      enableMainButtons(true);
+    });
+
+    peer.on('disconnected', () => setStatus('Connessione al server di segnalazione interrotta. Sto provando a riconnettere…', 'warn'));
+    peer.on('close', () => setStatus('Collegamento chiuso.', 'warn'));
+
+    return peer;
+  }
+
+  function enableMainButtons(enabled) {
+    hostBtn.disabled = !enabled;
+    joinBtn.disabled = !enabled;
+  }
+
+  function attachCallHandlers(call) {
+    currentCall = call;
+    hangBtn.disabled = false;
+    call.on('stream', (remoteStream) => {
+      remoteAudio.srcObject = remoteStream;
+      remoteAudio.play().catch(() => {});
+      setStatus('Chiamata attiva. Ora potete parlare.', 'ok');
+    });
+    call.on('close', () => {
+      setStatus('La chiamata è stata chiusa.', 'warn');
+      hangBtn.disabled = true;
+      currentCall = null;
+      remoteAudio.srcObject = null;
+    });
+    call.on('error', (err) => {
+      setStatus('Errore nella chiamata: ' + (err.message || err), 'bad');
+    });
+  }
+
+  async function startHost() {
+    const room = normalizeRoom(roomInput.value);
+    roomInput.value = room;
+    role = 'host';
+    enableMainButtons(false);
+    setStatus('Richiedo il permesso del microfono…');
+    try {
+      const stream = await getMic();
+      const p = makePeer(hostId(room));
+      p.on('open', async () => {
+        const link = currentInviteLink();
+        inviteLink.textContent = link;
+        inviteArea.classList.remove('hidden');
+        const copied = await copyText(link);
+        setStatus(
+          'Stanza creata: ' + room + '\n' +
+          (copied ? 'Ho copiato il link invito negli appunti. Invialo all’altra persona.' : 'Copia o comunica all’altra persona il nome stanza: ' + room) + '\n' +
+          'Attendo che l’altra persona entri…',
+          'ok'
+        );
+      });
+      p.on('call', (call) => {
+        setStatus('Chiamata in arrivo. Rispondo automaticamente…', 'ok');
+        call.answer(stream);
+        attachCallHandlers(call);
+      });
+    } catch(e) {
+      setStatus('Non riesco ad avviare la stanza: ' + e.message, 'bad');
+      enableMainButtons(true);
+    }
+  }
+
+  async function joinRoom() {
+    const room = normalizeRoom(roomInput.value);
+    roomInput.value = room;
+    role = 'guest';
+    enableMainButtons(false);
+    setStatus('Richiedo il permesso del microfono…');
+    try {
+      const stream = await getMic();
+      const p = makePeer();
+      p.on('open', () => {
+        setStatus('Entro nella stanza: ' + room + '\nChiamo l’altro utente…');
+        const call = p.call(hostId(room), stream);
+        attachCallHandlers(call);
+      });
+    } catch(e) {
+      setStatus('Non riesco a entrare nella stanza: ' + e.message, 'bad');
+      enableMainButtons(true);
+    }
+  }
+
+  function hangUp() {
+    if (currentCall) {
+      try { currentCall.close(); } catch(e) {}
+    }
+    if (peer) {
+      try { peer.destroy(); } catch(e) {}
+      peer = null;
+    }
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+    remoteAudio.srcObject = null;
+    hangBtn.disabled = true;
+    muteBtn.disabled = true;
+    muted = false;
+    muteBtn.textContent = 'Disattiva microfono';
+    enableMainButtons(true);
+    setStatus('Chiamata chiusa. Puoi creare o entrare di nuovo in una stanza.', 'warn');
+  }
+
+  hostBtn.addEventListener('click', startHost);
+  joinBtn.addEventListener('click', joinRoom);
+  copyLinkBtn.addEventListener('click', async () => {
+    const link = currentInviteLink();
+    inviteLink.textContent = link;
+    inviteArea.classList.remove('hidden');
+    const ok = await copyText(link);
+    setStatus(ok ? 'Link copiato negli appunti.' : 'Non sono riuscito a copiare automaticamente. Copia il link visualizzato.', ok ? 'ok' : 'warn');
+  });
+  muteBtn.addEventListener('click', () => {
+    if (!localStream) return;
+    muted = !muted;
+    localStream.getAudioTracks().forEach(t => t.enabled = !muted);
+    muteBtn.textContent = muted ? 'Riattiva microfono' : 'Disattiva microfono';
+    setStatus(muted ? 'Microfono disattivato.' : 'Microfono riattivato.', muted ? 'warn' : 'ok');
+  });
+  hangBtn.addEventListener('click', hangUp);
+  themeBtn.addEventListener('click', () => {
+    document.body.classList.toggle('light');
+    themeBtn.textContent = document.body.classList.contains('light') ? 'Tema scuro' : 'Tema chiaro';
+  });
+
+  window.addEventListener('beforeunload', () => {
+    try { if (currentCall) currentCall.close(); } catch(e) {}
+    try { if (peer) peer.destroy(); } catch(e) {}
+    try { if (localStream) localStream.getTracks().forEach(t => t.stop()); } catch(e) {}
+  });
+})();
+</script>
+</body>
+</html>
